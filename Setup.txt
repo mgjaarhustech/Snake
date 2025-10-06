@@ -1,0 +1,45 @@
+snake/
+├─ api/
+│  ├─ proto/            		# .proto files (gRPC source of truth)
+│  ├─ openapi/          		# OpenAPI (generated from proto via the gateway)
+│  └─ docs/             		# Spec v1 (spaces, rewards, handshake), changelog
+├─ env-dotnet/
+│  ├─ Snake.EnvServer.csproj
+│  ├─ Program.cs
+│  ├─ Game/
+│  │  ├─ Env.cs
+│  │  └─ Types.cs
+│  ├─ Services/
+│  │  └─ SnakeEnvService.cs
+│  ├─ REST/
+│  │  └─ Dto.cs
+│  ├─ Properties/
+│  │  └─ launchSettings.json    # optional (F5 run)
+│  └─ Dockerfile                # optional
+├─ gateway/             		# REST/HTTP + WebSocket relay → talks gRPC to env
+│  ├─ server/           		# tiny FastAPI/Node service; emits OpenAPI spec
+│  └─ README.md
+├─ env-js/              		# JS/TS environment for local training (perf)
+│  ├─ src/              		# Pure TS, or WASM wrapper around env-cpp
+│  └─ package.json
+├─ clients/
+│  ├─ python/           		# Python SDK (Gym-like) – local & remote
+│  │  ├─ snakeenv/
+│  │  └─ pyproject.toml
+│  ├─ js/               		# JS/TS SDK – local (env-js/WASM) & remote (gRPC/REST)
+│  ├─ csharp/           		# Optional: .NET SDK (NuGet) using gRPC
+│  ├─ go/               		# Optional: Go module using gRPC
+│  └─ rust/             		# Optional: crate using tonic (gRPC)
+├─ agents/
+│  ├─ examples/         		# Reference agents (dqn_baseline/, random_agent/, etc.)
+│  └─ starters/         		# Minimal “play-only” templates per language
+├─ eval/
+│  ├─ snake-eval/       		# Tournament/referee CLI (fixed spec & seeds)
+│  └─ configs/
+├─ ui/
+│  ├─ web/              		# React viewer + leaderboard (neutral telemetry)
+│  └─ README.md
+├─ tools/               		# dev tools (e.g., your watch_metrics.py), optional
+├─ tests/               		# conformance/determinism suites across builds
+├─ scripts/             		# bootstrap/build/run helpers
+└─ README.md

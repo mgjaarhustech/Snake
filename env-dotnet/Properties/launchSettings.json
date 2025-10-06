@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "Snake.EnvServer": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "applicationUrl": "http://localhost:8080;http://localhost:50051",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "grpc-listen": "http://0.0.0.0:50051",
+        "cols": "40",
+        "rows": "30",
+        "timeout-mult": "150"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+dotnet restore
+dotnet build -c Release
+dotnet run -c Release -- --cols 40 --rows 30 --timeout-mult 150 --rest-port 8080 --grpc-port 50051
+
+For docker
+dotnet publish -c Release -r linux-x64
+docker build -t snake-env .
+docker run -p 8080:8080 -p 50051:50051 snake-env
+
+Swagger: http://localhost:8080/swagger
+gRPC: localhost:50051
+
+

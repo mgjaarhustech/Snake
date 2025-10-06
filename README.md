@@ -253,6 +253,23 @@ Run it: node my_agent.mjs
 ```[ eat_food, death, step_cost, toward_food, turning, timeout ]``` or derive your own reward shaping.
 - Build your own DQN/A2C/evolution logic around reset/step.
 
+## C#
+1. Create a console app (once):
+```bash
+dotnet new console -n SnakeJsClientDemo
+cd SnakeJsClientDemo
+```
+2. Drop the file above in clients/csharp/SnakeRestDense11Client.cs (or directly in the project folder).
+If you keep the #if DEMO block, compile with -define:DEMO to run the demo.
+
+3. Build & run:
+```bash
+# run the server first (REST on :8080)
+dotnet run -c Release --project ../env-dotnet -- --cols 40 --rows 30 --timeout-mult 150 --rest-port 8080 --grpc-port 50051
+
+# in another terminal, run the demo client (if DEMO block kept)
+dotnet run -p SnakeJsClientDemo -c Release -property:DefineConstants=DEMO
+```
 ## FAQ / Tips
 
 - If REST Reset returns a dense obs when you asked for RawState, you likely sent UPPER_CASE ("RAW_STATE").

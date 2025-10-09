@@ -1,7 +1,7 @@
 # 🐍 Snake AI Tournament — Environment & APIs
 
-A tiny, deterministic **Snake** environment with **gRPC** and a simple **REST** mirror.  
-Students write agents; this repo provides the environment server and example clients.
+Deterministic **Snake** environment with **gRPC** and a simple **REST** mirror.  
+Students write agents; this repo provides the environment server, encoders, and tiny example clients/tests.
 
 ---
 
@@ -11,14 +11,22 @@ Students write agents; this repo provides the environment server and example cli
 - [Run the Server](#run-the-server)
   - [A) .NET (direct)](#a-net-direct)
   - [B) Docker](#b-docker)
+- [Swagger](#swagger)
 - [API Surface](#api-surface)
-  - [Actions](#actions)
+  - [Actions (discrete)](#actions-discrete)
   - [Reward Signals](#reward-signals)
   - [Observation Types (ObsType)](#observation-types-obstype)
   - [Raycasts19 Details](#raycasts19-details)
-- [REST (JSON) Quickstart](#rest-json-quickstart)
-- [gRPC Quickstart (Python)](#grpc-quickstart-python)
-- [Determinism Check](#determinism-check)
+- [REST (JSON) Endpoints](#rest-json-endpoints)
+  - [Examples (curl)](#examples-curl)
+- [gRPC Overview](#grpc-overview)
+  - [Requesting Raw Frames via gRPC (`with_raw`)](#requesting-raw-frames-via-grpc-with_raw)
+- [Clients & Quickstarts](#clients--quickstarts)
+  - [Python (REST) minimal client](#python-rest-minimal-client)
+  - [Node/JS (REST) minimal client](#nodejs-rest-minimal-client)
+  - [C# (REST) minimal client](#c-rest-minimal-client)
+- [Smoke Tests](#smoke-tests)
+- [Determinism](#determinism)
 - [Repo Layout](#repo-layout)
 - [FAQ / Tips](#faq--tips)
 
@@ -26,9 +34,9 @@ Students write agents; this repo provides the environment server and example cli
 
 ## Requirements
 
-- **.NET 8 SDK** (run the server)
-- **Docker** (optional; containerized run)
-- **Python 3.9+** (optional; example clients)
+- **.NET 8 SDK** (to run the server)
+- **Docker** (optional; to run containerized)
+- **Python 3.9+** (optional; for example clients/tests)
 - Open ports: **8080** (REST) and **50051** (gRPC)
 
 ---
@@ -41,240 +49,402 @@ Students write agents; this repo provides the environment server and example cli
 cd env-dotnet
 dotnet restore
 dotnet build -c Release
-dotnet run -c Release -- --cols 40 --rows 30 --timeout-mult 150 --rest-port 8080 --grpc-port 50051
+dotnet run -c Release -- --cols 30 --rows 30 --timeout-mult 150 --rest-port 8080 --grpc-port 50051
 ```
-
-- Swagger (REST): http://localhost:8080/swagger
-- gRPC endpoint: localhost:50051
 
 ### B) Docker
 ```bash
 cd env-dotnet
-dotnet publish -c Release -r linux-x64
+dotnet publish -c Release -r linux-x64 -p:PublishSingleFile=true
 docker build -t snake-env .
 docker run -p 8080:8080 -p 50051:50051 snake-env
 ```
+
+## Swagger
+Open **Swagger UI** at:
+```bash
+http://localhost:8080/swagger
+```
+You can “play” the environment from here:
+1. **GET /v1/spec** to inspect.
+2. **POST /v1/reset** to start (choose obs_type).
+3. **POST /v1/step** to send numeric actions (0/1/2).
+
 
 ## API Surface
 
 ### Actions
 
-- Straight (0)
-- TurnRight (1)
-- TurnLeft (2)
+**Numeric only** for REST & gRPC:
+
+- ```0``` → Straight
+- ```1``` → TurnRight
+- ```2``` → TurnLeft
 
 ### Reward Signals
 
-Fixed order in every StepResponse.signals:
+Each step returns ```signals``` (length 6) in this fixed order:
+
 ```bash
 [ eat_food, death, step_cost, toward_food, turning, timeout ]
 ```
 
+- ```eat_food``` (e): 1.0 on the step you eat, else 0.0.
+- ```death``` (d): 1.0 on the terminal step (wall/self/timeout), else 0.0.
+- ```step_cost``` (s): 1.0 every step (including terminal). Apply your own weight.
+- ```toward_food``` (t): ΔChebyshev / max(cols,rows) ∈ {−1/max, 0, +1/max}.
+- ```turning``` (r): 1.0 if you turned this step, else 0.0.
+- ```timeout``` (T): 1.0 only on terminal timeout, else 0.0.
+
 ### Observation Types (ObsType)
 
-REST request enum casing: use PascalCase (RawState, Dense28Ego, …).
-gRPC (Python stubs) enum casing: use ALL_CAPS (RAW_STATE, DENSE28_EGO, …).
+REST request enum casing: **PascalCase** (```Dense11```, ```RawState```, …)
+gRPC enum casing (generated stubs): **UPPER_SNAKE_CASE** (```DENSE11```, ```RAW_STATE```, …)
 
-| Name      | Length     | Description      |
+| **Name**      | **Length**     | **Description**      |
 | ------------- | ------------- | ------------- |
-| RawState | - | Full board geometry: head, body, food, grid size, dir string. |
-| Dense32 | 32 | 5×5 ring (excluding center): blocked=1, plus dir one-hot + food bits. |
 | Dense11 | 11 | 3 danger flags (F,R,L), dir one-hot [L,R,U,D], food bits [L,R,U,D]. |
 | Dense28Ego | 28 | 24 egocentric cells + food relative to heading [ahead, behind, left, right]. |
+| Dense32 | 32 | 5×5 ring (excluding center): blocked=1, plus dir one-hot + food bits. |
 | Raycasts19 | 19 | 8 dirs × (frac_to_wall, frac_to_body) = 16 + 3 food features. |
-| RGB | - | NOT IMPLEMENTET |
+| RawState | - | Full board geometry: head, body, food, grid size, dir string. |
+| RGB | - | NOT IMPLEMENTED |
 
 ### Raycasts19 Details
-Order: N, NE, E, SE, S, SW, W, NW; each contributes two floats: ```frac_to_wall```, then ```frac_to_body```.
+Order: **N, NE, E, SE, S, SW, W, NW**; each contributes two floats: ```frac_to_wall```, then ```frac_to_body```.
 - ```frac_to_wall = steps_to_wall_from_head / max_steps_to_wall_global_in_that_direction```
-  - Axial max: cols-1 (E/W), rows-1 (N/S)
-  - Diagonal max: min(cols-1, rows-1)
-- frac_to_body = steps_to_first_body / same_max, or 1.0 if no body before wall.
+  - Axial max: ```cols-1``` (E/W), ```rows-1``` (N/S)
+  - Diagonal max: ```min(cols-1, rows-1)```
+- ```frac_to_body = steps_to_first_body / same_max```, or ```1.0 if``` no body before wall.
 - Food (last 3):
-  - dx_norm = (food.x - head.x)/(cols-1) ∈ [-1,1]
-  - dy_norm = (food.y - head.y)/(rows-1) ∈ [-1,1]
-  - cheb_norm = chebyshev(head,food)/max(cols,rows) ∈ [0,1]
+  - ```dx_norm = (food.x - head.x)/(cols-1) ∈ [-1,1]```
+  - ```dy_norm = (food.y - head.y)/(rows-1) ∈ [-1,1]```
+  - ```cheb_norm = chebyshev(head,food)/max(cols,rows) ∈ [0,1]```
 
-  ## REST (JSON) Quickstart
 
-The REST endpoints return protobuf JSON with default values included (so keys like score, steps are always present).
-Use PascalCase for enum strings in requests: RawState, Dense28Ego, Raycasts19, Straight, TurnRight, TurnLeft.
+## REST (JSON) Endpoints
+- **GET** ```/v1/spec``` → environment spec
+- **POST** ```/v1/reset``` → body ```{ "seed": <uint64>, "obs_type": "<PascalCase>" }```
+- **POST** ```/v1/step``` → ```body { "action": <int 0/1/2> }```
+- **POST** ```/v1/reset_many``` → body ```{ "seeds"?: [uint64], "obs_type": "<PascalCase>", "count": <int>, "session"?: "<string>" }```
+  - Returns ```{ "session": "<id>", "envs": [StepResponse, ...] }```
+- **POST** ```/v1/step_many``` → body ```{ "session": "<id>", "actions": [<int> ...] }```
+  - If ```actions``` length is 1 → broadcast to all envs.
+  - Returns ```{ "session": "<id>", "envs": [StepResponse, ...] }```
+- **POST** ```/v1/reset_many_combo``` → body
+  - ```{ "seeds": [1,2,...], "obs_type": "Dense11", "count": 8, "session": "" }```
+  - Returns a normal ManyResponse but each envs[i] contains rawForRender (a RawState) alongside the chosen obs. 
+- **POST** /v1/step_many_combo → body
+  - ```{ "session": "<id>", "actions": [1] }```   // broadcast or per-env
+  - Returns ManyResponse with envs[i].rawForRender populated.
+  - Note: ```/v1/reset_many``` and ```/v1/step_many``` do not include raw frames; use the ```*_many_combo``` endpoints when you need obs and raw per env.
+- **Echo behavior**: after a snake dies in an env: ```done=true```, ```signals=[0,0,0,0,0,0]```, and the **last obs** is repeated until you ```reset_many```.
 
-### Endpoints:
-- GET /v1/spec → environment spec & supported obs list
-- POST /v1/reset → { "seed": <uint64>, "obs_type": "<PascalCase>" }
-- POST /v1/step → { "action": "<PascalCase>" }
-- POST /v1/reset_many / POST /v1/step_many → basic vectorized mirror (single-env proxy)
+Naming note: in REST combo endpoints the envelope field is raw_for_render (snake_case).
+In gRPC, StepResponse.raw_for_render shows up in protobuf-JSON as rawForRender (camelCase).
+@markdown
 
-### Minimal Python (REST):
-```python
-# clients/python/test_rest.py
-import requests, random
+**StepResponse (REST) shape**
 
-BASE = "http://localhost:8080/v1"
-OBS_TYPES = ["RawState", "Dense32", "Dense11", "Dense28Ego", "Raycasts19"]
-ACTIONS   = ["Straight", "TurnRight", "TurnLeft"]
+```json
+{
+  "obs": {
+    "type": "DENSE11",
+    "dense": { "data": [ ... ] }
+  },
+  "signals": [e, d, s, t, r, T],
+  "done": true,
+  "score": 0,
+  "length": 3,
+  "death": "",
+  "steps": 15,
 
-print("SPEC:", requests.get(f"{BASE}/spec").json())
-
-for ot in OBS_TYPES:
-    r = requests.post(f"{BASE}/reset", json={"seed": 123, "obs_type": ot}).json()
-    obs = r["obs"]
-    if obs.get("dense"):
-        print(ot, "dense length:", len(obs["dense"]["data"]))
-    else:
-        print(ot, "raw step:", obs["raw"]["step"], "body len:", len(obs["raw"]["body"]))
-    for _ in range(5):
-        s = requests.post(f"{BASE}/step", json={"action": random.choice(ACTIONS)}).json()
-    print("final:", s["score"], s["length"], s["death"], s["steps"])
-```
-
-### gRPC Quickstart (Python)
-
-1. Generate stubs (only if you plan to write Python gRPC agents or after changing env.proto):
-```python
-# from repo root
-python -m pip install grpcio grpcio-tools
-python -m grpc_tools.protoc -I api/proto \
-  --python_out=clients/python \
-  --grpc_python_out=clients/python \
-  api/proto/snake/v1/env.proto
-
-# ensure packages exist for imports
-# (create once if the folders don't already contain __init__.py)
-# clients/python/snake/__init__.py
-# clients/python/snake/v1/__init__.py
-```
-2. Minimal Python (gRPC):
-```python
-# clients/python/test_grpc.py
-import grpc, random
-from snake.v1 import env_pb2, env_pb2_grpc
-from google.protobuf import empty_pb2
-
-OBS = [env_pb2.RAW_STATE, env_pb2.DENSE32, env_pb2.DENSE11, env_pb2.DENSE28_EGO, env_pb2.RAYCASTS19]
-ACT = [env_pb2.STRAIGHT, env_pb2.TURN_RIGHT, env_pb2.TURN_LEFT]
-
-ch = grpc.insecure_channel("localhost:50051")
-stub = env_pb2_grpc.SnakeEnvStub(ch)
-print("SPEC:", stub.GetSpec(empty_pb2.Empty()))
-
-for ot in OBS:
-    s = stub.Reset(env_pb2.ResetRequest(seed=123, obs_type=ot))
-    if s.obs.WhichOneof("payload") == "dense":
-        print(ot, "dense length:", len(s.obs.dense.data))
-    else:
-        print(ot, "raw step:", s.obs.raw.step, "body len:", len(s.obs.raw.body))
-    for _ in range(5):
-        s = stub.Step(env_pb2.StepRequest(action=random.choice(ACT)))
-    print("final:", s.score, s.length, s.death, s.steps)
-```
-***Note:*** Python gRPC uses the ***proto*** enum names (RAW_STATE, DENSE28_EGO, …), not PascalCase.
-
-## Determinism Check
-
-### Same seed ⇒ same initial observation (per ObsType).
-
-- **REST:**
-```bash
-python clients/python/test_determinism_rest.py
-```
-- **gRPC:**
-```bash
-# ensure PYTHONPATH includes clients/python if needed
-python clients/python/test_determinism_grpc.py
-```
-Each script calls Reset(seed=SEED) twice for every ObsType and checks the two observations match
-(exact for RawState, float-equality with tiny tolerance for dense vectors).
-
-## JS Client (Node) — Quickstart
-
-We provide a minimal REST client for **Dense11** at: clients/js/snakeRestDense11.mjs
-
-It exposes:
-- `spec()` → GET `/v1/spec`
-- `reset(seed)` → POST `/v1/reset` (returns `Float32Array(11)`)
-- `step(action)` → POST `/v1/step` (returns `{ obs, signals, done, score, length, death, steps }`)
-- `ACTIONS = ["Straight","TurnRight","TurnLeft"]`
-- `OBS_TYPE = "Dense11"`
-
-> Runs in **Node 18+** (built-in `fetch`). Use **.mjs** (ES modules).
-
-### 1) Prerequisites
-- Node.js **18+**: `node -v`
-- Server running (REST on **:8080**)
-
-### 2) Run the built-in demo
-This just takes random actions (no learning).
-```bash
-node clients/js/snakeRestDense11.mjs
-```
-### 3) Use it in your own agent
-Create my_agent.mjs (ESM) in your project root:
-```js
-import SnakeRestDense11, { ACTIONS } from './clients/js/snakeRestDense11.mjs';
-
-const env = new SnakeRestDense11('http://localhost:8080/v1');
-
-const spec = await env.spec();
-console.log('SPEC:', spec);
-
-// Deterministic reset
-let state = await env.reset(123);   // Float32Array(11)
-
-// TODO: initialize your model / replay buffer here
-
-let done = false;
-let episodeReturn = 0;
-
-while (!done) {
-  // TODO: choose action index 0..2 from your policy (e.g., epsilon-greedy)
-  const action = Math.floor(Math.random() * ACTIONS.length);
-
-  const tr = await env.step(action);
-  // tr.obs -> next Dense11 (Float32Array(11))
-  // tr.signals -> [eat_food, death, step_cost, toward_food, turning, timeout]
-
-  // TODO: compute your reward (from tr.signals or your own shaping)
-  // TODO: store (state, action, reward, tr.obs, tr.done) in replay
-  // TODO: optimize your network on batches
-
-  state = tr.obs;
-  episodeReturn += 0; // <- replace with your reward
-  done = tr.done;
+  // Present on /reset_combo and /step_combo (and on gRPC when with_raw=true):
+  "rawForRender": {
+    "cols": 30,
+    "rows": 30,
+    "step": 15,
+    "head": { "x": 16, "y": 14 },
+    "dir": "RIGHT",
+    "body": [ { "x": 15, "y": 14 }, { "x": 14, "y": 14 } ],
+    "food": { "x": 24, "y": 5 }
+  }
 }
-
-console.log('Episode finished.');
 ```
-Run it: node my_agent.mjs
 
-### 5) Reward & learning are up to you
-- The client does not compute rewards. Use tr.signals:
-```[ eat_food, death, step_cost, toward_food, turning, timeout ]``` or derive your own reward shaping.
-- Build your own DQN/A2C/evolution logic around reset/step.
+### StepResponse (protobuf-JSON)
+```json
+{
+  "obs": {
+    "type": "DENSE11",       // proto enum name (UPPER_SNAKE_CASE)
+    "dense": { "data": [ ... ] }   // or "raw": { ... } for RawState
+  },
+  "signals": [e, d, s, t, r, T],
+  "done": true|false,
+  "score": 0,
+  "length": 3,
+  "death": "",               // "", "wall", "self", "timeout"
+  "steps": 15
+}
+```
 
-## C#
-1. Create a console app (once):
+#### New convenience endpoints (obs + raw frame for rendering)
+
+These mirror `reset`/`step`, but also return a `RawState` frame for rendering,
+so clients don’t have to switch obs types. The response is an envelope:
+
+- `POST /v1/reset_combo`
+  - **Request body**:
+    ```json
+    { "seed": 123, "obs_type": "Dense11" }
+    ```
+  - **Response**:
+    ```json
+    {
+      "step": { /* StepResponse */ },
+      "raw_for_render": { /* RawState */ }
+    }
+    ```
+
+- `POST /v1/step_combo`
+  - **Request body**:
+    ```json
+    { "action": 1 }   // 0=Straight, 1=TurnRight, 2=TurnLeft
+    ```
+  - **Response**:
+    ```json
+    {
+      "step": { /* StepResponse */ },
+      "raw_for_render": { /* RawState */ }
+    }```
+
+
+- `POST /v1/reset_combo_many`
+  - **Request body**:
+    ```json
+    {
+    "seeds": [1, 2, 3, 4],     // optional; server fills if omitted or shorter than count
+    "obs_type": "Dense11",
+    "count": 4,                // required (>0)
+    "session": ""              // optional; empty/new = create new session id, else replace that session
+    }
+    ```
+  - **Response**:
+    ```json
+    {
+    "session": "abc123...",    // pool id (save this and reuse in step calls)
+    "envs": [
+    {
+      "step": { /* StepResponse (done=false, initial obs) */ },
+      "raw_for_render": { /* RawState */ }
+    }
+    // ... repeated count times
+    ]
+    } ```
+
+Step the whole pool and get both obs and raw for each env.
+If actions length is 1, it’s broadcast to all envs; otherwise it must equal the pool size.
+- `POST /v1/step_combo_many`
+  - **Request body**:
+    ```json
+    {
+    "session": "abc123...",    // from reset_combo_many
+    "actions": [1]             // broadcast "TurnRight" to all envs (0/1/2)
+    }
+    ```
+
+  - **Response:**
+    ```json
+    {
+    "session": "abc123...",
+    "envs": [
+    {
+      "step": { /* StepResponse (echo rules apply after death) */ },
+      "raw_for_render": { /* RawState */ }
+    }
+    // ... one per env
+    ]
+    }
+    ```
+
+    
+
+> Note: `raw_for_render` is **not** part of `StepResponse`. It only appears in the combo
+> responses (and in gRPC if you set `with_raw=true` on single-env `Reset/Step`).
+
+### Examples (curl)
+**Spec**
 ```bash
-dotnet new console -n SnakeJsClientDemo
-cd SnakeJsClientDemo
+curl -s http://localhost:8080/v1/spec | jq
 ```
-2. Drop the file above in clients/csharp/SnakeRestDense11Client.cs (or directly in the project folder).
-If you keep the #if DEMO block, compile with -define:DEMO to run the demo.
 
-3. Build & run:
+**Start single env (Dense11)**
 ```bash
-# run the server first (REST on :8080)
-dotnet run -c Release --project ../env-dotnet -- --cols 40 --rows 30 --timeout-mult 150 --rest-port 8080 --grpc-port 50051
-
-# in another terminal, run the demo client (if DEMO block kept)
-dotnet run -p SnakeJsClientDemo -c Release -property:DefineConstants=DEMO
+curl -s -X POST http://localhost:8080/v1/reset \
+  -H 'content-type: application/json' \
+  -d '{"seed":123, "obs_type":"Dense11"}' | jq
 ```
+
+**Step (numeric action)**
+```bash
+curl -s -X POST http://localhost:8080/v1/step \
+  -H 'content-type: application/json' \
+  -d '{"action":1}' | jq
+```
+
+**Create a pool of 8 envs (Dense11)**
+```bash
+curl -s -X POST http://localhost:8080/v1/reset_many \
+  -H 'content-type: application/json' \
+  -d '{"seeds":[1,2,3,4,5,6,7,8], "obs_type":"Dense11", "count":8, "session":""}' | jq
+```
+
+**Step pool (broadcast TurnRight)**
+```bash
+curl -s -X POST http://localhost:8080/v1/step_many \
+  -H 'content-type: application/json' \
+  -d '{"session":"<paste-session>", "actions":[1]}' | jq
+```
+
+**Reset with raw (Dense11)**
+```bash
+curl -s -X POST http://localhost:8080/v1/reset_combo \
+  -H 'content-type: application/json' \
+  -d '{"seed":123, "obs_type":"Dense11"}' | jq
+```
+**Step with raw (numeric action)**
+```bash
+curl -s -X POST http://localhost:8080/v1/step_combo \
+  -H 'content-type: application/json' \
+  -d '{"action":1}' | jq
+```
+
+**Reset a pool with raw frames**
+```bash
+curl -s -X POST http://localhost:8080/v1/reset_many_combo \
+  -H 'content-type: application/json' \
+  -d '{"seeds":[1,2,3,4], "obs_type":"Dense11", "count":4, "session":""}' | jq
+```
+
+**Step a pool (broadcast TurnRight) with raw frames**
+```bash
+curl -s -X POST http://localhost:8080/v1/step_many_combo \
+  -H 'content-type: application/json' \
+  -d '{"session":"<paste-session>", "actions":[1]}' | jq
+```
+
+gRPC has the equivalent toggle via ```with_raw: bool``` on ```ResetRequest```/```StepRequest```; REST uses separate endpoints for simplicity.
+
+## gRPC Overview
+
+- Service: ```snake.v1.SnakeEnv```
+- Methods: ```GetSpec```, ```Reset```, ```Step```, ```ResetMany```, ```StepMany```
+- Numeric actions: ```StepRequest.action: int32``` (0/1/2)
+- **Vector (pool):**:
+  - ```ResetManyRequest { repeated uint64 seeds; ObsType obs_type; int32 count; string session; }```
+  - ```StepManyRequest { repeated int32 actions; string session; }```
+- Generate Python stubs after editing proto:
+```bash
+python -m grpc_tools.protoc -I api/proto \
+  --python_out=clients/python --grpc_python_out=clients/python \
+  api/proto/snake/v1/env.proto
+```
+- Generate JS (+d.ts) stubs
+```bash
+npm i -D grpc-tools grpc_tools_node_protoc_ts @grpc/grpc-js
+npx grpc_tools_node_protoc \
+  --js_out=import_style=commonjs,binary:./clients/js-grpc \
+  --grpc_out=grpc_js:./clients/js-grpc \
+  -I ./api/proto ./api/proto/snake/v1/env.proto
+npx grpc_tools_node_protoc_ts \
+  --ts_out=grpc_js:./clients/js-grpc \
+  -I ./api/proto ./api/proto/snake/v1/env.proto
+
+```
+
+
+### Requesting Raw Frames via gRPC (```with_raw```)
+If you’ve applied the proto update and rebuilt stubs:
+
+- ```ResetRequest.with_raw: bool```
+- ```StepRequest.with_raw: bool```
+- ```StepResponse.raw_for_render: RawState``` (present if ```with_raw=true```)
+
+Example (Python):
+```python
+resp = stub.ResetMany(env_pb2.ResetManyRequest(
+    seeds=[1,2,3,4], obs_type=env_pb2.DENSE11, count=4, session="", with_raw=True))
+print(resp.session, len(resp.envs), resp.envs[0].raw_for_render.cols)
+
+resp = stub.StepMany(env_pb2.StepManyRequest(
+    session=resp.session, actions=[1], with_raw=True))
+print(resp.envs[0].raw_for_render.head.x, resp.envs[0].steps)
+```
+For REST, use ```/v1/reset_many_combo``` and ```/v1/step_many_combo``` to get raw frames for every env.
+
+## Clients & Quickstarts
+
+### Python (REST) minimal client
+```clients/python/snake_rest_dense11.py``` provides:
+  - ```spec()```, ```reset(seed)```, ```step(action)``` with **Dense11** and numeric actions (0/1/2).
+  - No learning logic; students add DQN/NE around it.
+
+### Node/JS (REST) minimal client
+- ```clients/js/snakeRestDense11.mjs``` provides:
+  - ```spec()```, ```reset(seed)```, ```step(action)``` with **Dense11** and numeric actions.
+  - Requires Node 18+ (global ```fetch```). ES modules.
+
+### C# (REST) minimal client
+```clients/csharp/SnakeRestDense11Client.cs``` provides:
+  - ```SpecAsync()```, ```ResetAsync(seed)```, ```StepAsync(action)``` with **Dense11** and numeric actions.
+
+## Smoke Tests
+From repo root:
+
+### REST
+```bash
+python clients/python/test_rest.py
+```
+
+Covers spec, determinism (same seed → same initial obs), single-env step, pool reset/step, and **echo-after-death**.
+
+### gRPC
+```bash
+# make sure Python stubs are generated (see gRPC Overview)
+python clients/python/test_grpc.py
+```
+Covers the same for gRPC.
+
+## Determinism
+- **Same seed ⇒ same initial observation** (for each ObsType).
+- Tests above verify this (raw equality for RawState, exact float list for dense encodings).
+
+```
+snake/
+├─ api/
+│  ├─ proto/                  # .proto files (gRPC source of truth)
+│  ├─ openapi/                # (generated by gateway, optional)
+│  └─ docs/                   # spec notes, changelog
+├─ Snake.Core/                # core game DLL (no protobuf)
+│  ├─ Game/Env.cs             # game logic (seed/reset/step/signals)
+│  └─ Game/Obs/…              # encoders (Dense11, Dense28Ego, Dense32, Raycasts19), RawStateEncoder
+├─ env-dotnet/                # ASP.NET server (gRPC + REST mirror)
+│  ├─ Services/SnakeEnvService.cs
+│  ├─ REST/Dto.cs
+│  ├─ Program.cs
+│  └─ Dockerfile
+├─ clients/
+│  ├─ python/                 # REST/gRPC minimal clients + tests
+│  ├─ js/                     # REST minimal client (ESM)
+│  └─ csharp/                 # REST minimal client
+├─ tests/                     # (optional) conformance/determinism suites
+└─ README.md
+```
+
 ## FAQ / Tips
-
-- If REST Reset returns a dense obs when you asked for RawState, you likely sent UPPER_CASE ("RAW_STATE").
-- REST expects PascalCase ("RawState").
-- gRPC clients don’t read the proto at runtime; they use generated stubs.
-Regenerate stubs if api/proto/snake/v1/env.proto changes.
-- If ports are busy, change --rest-port / --grpc-port when starting the server.
-- ResetMany/StepMany are basic mirrors for now; full vectorization can be added later.
+- **REST obs type casing:** use **PascalCase** (```"Dense11"```, ```"RawState"```).
+- In responses, the enum shows as proto name (e.g., ```"DENSE11"```).
+- **Numeric REST actions:** always send ```{ "action": 0|1|2 }```.
+- **Pool “echo” behavior:** after an env is terminal, subsequent ```step_many``` returns ```done=true```, ```signals=[0,0,0,0,0,0]```, and repeats the last observation until you ```reset_many```.
+- **gRPC stubs:** clients don’t read ```.proto``` at runtime—regenerate after proto changes.
+- **Ports in use?** Change ```--rest-port``` / ```--grpc-port``` when starting the server.

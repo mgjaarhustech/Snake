@@ -32,7 +32,18 @@ builder.Services.AddGrpc();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// CORS
+builder.Services.AddCors(o =>
+{
+    o.AddPolicy("OpenCors", p => p
+        .AllowAnyOrigin()
+        .AllowAnyHeader()
+        .AllowAnyMethod());
+});
+
 var app = builder.Build();
+app.UseCors("OpenCors");
+
 app.MapGrpcService<SnakeEnvService>();
 
 // -------- REST --------

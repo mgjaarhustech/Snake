@@ -19,15 +19,17 @@ public sealed class SnakeRestDense11Client : IDisposable
     public Uri BaseUri { get; }
 
     public SnakeRestDense11Client(string baseUrl)
+{
+    // Ensure BaseAddress ends with a slash so "spec" -> ".../v1/spec"
+    var rooted = baseUrl.TrimEnd('/') + "/";
+    BaseUri = new Uri(rooted);
+    _http = new HttpClient { BaseAddress = BaseUri };
+    _json = new JsonSerializerOptions
     {
-        BaseUri = new Uri(baseUrl.EndsWith("/") ? baseUrl[..^1] : baseUrl);
-        _http = new HttpClient { BaseAddress = BaseUri };
-        _json = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.Never
-        };
-    }
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never
+    };
+}
 
     public void Dispose() => _http.Dispose();
 

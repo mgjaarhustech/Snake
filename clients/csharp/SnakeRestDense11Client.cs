@@ -1,24 +1,16 @@
-// clients/csharp/SnakeRestDense11Client.cs
-// ------------------------------------------------------------
-// Minimal REST client for your Snake env using Dense11.
-// - No DQN, no training; You build that around this.
-// - Uses PascalCase enums for REST ("Dense11", "Straight", ...)
-// - Parses protobuf-JSON responses (server uses JsonFormatter w/ defaults).
-//
-// Usage in a Console app:
+// Minimal REST client for your Snake env using Dense11 (numeric actions).
+// Usage:
 //   var env = new SnakeRestDense11Client("http://localhost:8080/v1");
 //   var spec = await env.SpecAsync();
 //   var s = await env.ResetAsync(123);
 //   var step = await env.StepAsync(SnakeRestDense11Client.Action.Straight);
-//
-// ------------------------------------------------------------
+
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 public sealed class SnakeRestDense11Client : IDisposable
 {
-    // REST expects PascalCase enum strings
     public enum Action { Straight = 0, TurnRight = 1, TurnLeft = 2 }
 
     private readonly HttpClient _http;
@@ -26,7 +18,6 @@ public sealed class SnakeRestDense11Client : IDisposable
 
     public Uri BaseUri { get; }
 
-    /// <param name="baseUrl">e.g., "http://localhost:8080/v1"</param>
     public SnakeRestDense11Client(string baseUrl)
     {
         BaseUri = new Uri(baseUrl.EndsWith("/") ? baseUrl[..^1] : baseUrl);
@@ -40,24 +31,16 @@ public sealed class SnakeRestDense11Client : IDisposable
 
     public void Dispose() => _http.Dispose();
 
-    // ---------------------------
-    // Public API
-    // ---------------------------
+    // --- Public API ---
 
-    /// <summary>GET /v1/spec → basic info and supported obs list.</summary>
     public async Task<SpecDto> SpecAsync(CancellationToken ct = default)
     {
         using var res = await _http.GetAsync("spec", ct);
         res.EnsureSuccessStatusCode();
-        var spec = await res.Content.ReadFromJsonAsync<SpecDto>(_json, ct)
-                   ?? throw new InvalidOperationException("Empty /v1/spec response");
-        return spec;
+        return await res.Content.ReadFromJsonAsync<SpecDto>(_json, ct)
+               ?? throw new InvalidOperationException("Empty /v1/spec response");
     }
 
-    /// <summary>
-    /// POST /v1/reset with obs_type="Dense11".
-    /// Returns the Dense11 vector (length 11).
-    /// </summary>
     public async Task<float[]> ResetAsync(ulong seed, CancellationToken ct = default)
     {
         var body = new ResetBody(seed, "Dense11");
@@ -66,26 +49,20 @@ public sealed class SnakeRestDense11Client : IDisposable
         var msg = await DeserializeStepAsync(res, ct);
         var dense = msg.Obs?.Dense?.Data
                     ?? throw new InvalidOperationException("Expected Dense11 payload on reset");
-        if (dense.Length != 11)
-            throw new InvalidOperationException($"Dense11 expected length 11, got {dense.Length}");
+        if (dense.Length != 11) throw new InvalidOperationException($"Dense11 expected length 11, got {dense.Length}");
         return dense;
     }
 
-    /// <summary>
-    /// POST /v1/step with an action.
-    /// Returns typed StepResult with Dense11 next obs and metadata.
-    /// </summary>
     public async Task<StepResult> StepAsync(Action action, CancellationToken ct = default)
     {
-        var body = new StepBody(action.ToString());
+        var body = new StepBody((int)action); // <-- numeric action now
         using var res = await _http.PostAsJsonAsync("step", body, _json, ct);
         res.EnsureSuccessStatusCode();
         var msg = await DeserializeStepAsync(res, ct);
 
         var dense = msg.Obs?.Dense?.Data
                     ?? throw new InvalidOperationException("Expected Dense11 payload on step");
-        if (dense.Length != 11)
-            throw new InvalidOperationException($"Dense11 expected length 11, got {dense.Length}");
+        if (dense.Length != 11) throw new InvalidOperationException($"Dense11 expected length 11, got {dense.Length}");
 
         return new StepResult(
             Obs: dense,
@@ -99,9 +76,7 @@ public sealed class SnakeRestDense11Client : IDisposable
         );
     }
 
-    // ---------------------------
-    // DTOs matching your REST surface
-    // ---------------------------
+    // --- DTOs ---
 
     public sealed class SpecDto
     {
@@ -112,11 +87,9 @@ public sealed class SnakeRestDense11Client : IDisposable
         [JsonPropertyName("reward_signals")] public string[] RewardSignals { get; set; } = Array.Empty<string>();
     }
 
-    // Request bodies
     public sealed record ResetBody(ulong seed, string obs_type);
-    public sealed record StepBody(string action);
+    public sealed record StepBody(int action); // <-- numeric
 
-    // Protobuf-JSON responses (Step/Reset return the same StepResponse shape)
     public sealed class StepResponseDto
     {
         [JsonPropertyName("obs")] public ObservationDto? Obs { get; set; }
@@ -130,10 +103,7 @@ public sealed class SnakeRestDense11Client : IDisposable
 
     public sealed class ObservationDto
     {
-        // Note: protobuf JSON uses proto enum names (e.g. "DENSE11")
         [JsonPropertyName("type")] public string? Type { get; set; }
-
-        // oneof payload: either raw or dense
         [JsonPropertyName("raw")] public RawStateDto? Raw { get; set; }
         [JsonPropertyName("dense")] public DenseDto? Dense { get; set; }
     }
@@ -161,19 +131,8 @@ public sealed class SnakeRestDense11Client : IDisposable
     }
 
     public sealed record StepResult(
-        float[] Obs,
-        float[] Signals,
-        bool Done,
-        int Score,
-        int Length,
-        string Death,
-        int Steps,
-        StepResponseDto Raw
+        float[] Obs, float[] Signals, bool Done, int Score, int Length, string Death, int Steps, StepResponseDto Raw
     );
-
-    // ---------------------------
-    // Internal helpers
-    // ---------------------------
 
     private async Task<StepResponseDto> DeserializeStepAsync(HttpResponseMessage res, CancellationToken ct)
     {
@@ -182,35 +141,3 @@ public sealed class SnakeRestDense11Client : IDisposable
         return msg;
     }
 }
-
-
-// ------------------------------------------------------------
-// OPTIONAL: Minimal demo Program (random actions; no learning)
-// Comment out or remove if you only want the client class.
-// ------------------------------------------------------------
-#if DEMO
-public class Program
-{
-    public static async Task Main()
-    {
-        var env = new SnakeRestDense11Client("http://localhost:8080/v1");
-
-        var spec = await env.SpecAsync();
-        Console.WriteLine($"SPEC: {spec.Cols}x{spec.Rows}, timeout_mult={spec.TimeoutMult}, obs=[{string.Join(",", spec.SupportedObs)}]");
-
-        // Deterministic reset
-        var s = await env.ResetAsync(123);
-        Console.WriteLine($"Reset Dense11 length: {s.Length}");
-
-        var rng = new Random();
-        for (int t = 0; t < 10; t++)
-        {
-            var a = (SnakeRestDense11Client.Action)rng.Next(0, 3);
-            var r = await env.StepAsync(a);
-            Console.WriteLine($"t={t:00}  a={a,-9}  len={r.Length,2}  score={r.Score}  done={r.Done}  death='{r.Death}'  steps={r.Steps}");
-            if (r.Done) break;
-            s = r.Obs;
-        }
-    }
-}
-#endif

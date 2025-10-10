@@ -1,0 +1,7 @@
+async function load() {
+  const res = await fetch('/tc/leaderboard');
+  const rows = await res.json();
+  // render rows: team, obs_type, games, total_score, avg_score, best_length
+}
+setInterval(load, 3000);
+load();

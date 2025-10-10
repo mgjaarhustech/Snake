@@ -7,7 +7,7 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "grpc-listen": "http://0.0.0.0:50051",
-        "cols": "40",
+        "cols": "30",
         "rows": "30",
         "timeout-mult": "150"
       }

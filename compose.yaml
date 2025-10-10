@@ -1,0 +1,22 @@
+services:
+  env:
+    build: ./env-dotnet
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:8080
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+
+  controller:
+    build: ./tournament-controller
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:8090
+      - ENV_BASE=http://env:8080/v1
+      - DEFAULT_GAMES=500
+      - MAX_STEPS_PER_EP=10000
+    depends_on:
+      - env
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./data:/data   # <-- SQLite file lives here (tournament.db)
